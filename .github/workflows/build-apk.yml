@@ -1,73 +1,53 @@
 name: Build Android APK
-
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-
+    branches: [main]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 解压项目压缩包
+      - uses: actions/checkout@v4
+      - name: 解压项目
         run: |
-          if [ -f secure-guard-project.zip ]; then
-            unzip -q secure-guard-project.zip
+          ls -la
+          if [ -f *.zip ]; then
+            unzip -q *.zip
+            ls -la
           fi
-
-      - name: 设置 Node.js 18
-        uses: actions/setup-node@v4
+      - name: 定位项目目录
+        id: finddir
+        run: |
+          DIR=$(find . -maxdepth 2 -name "package.json" -not -path "*/node_modules/*" | head -1 | xargs dirname)
+          echo "dir=$DIR" >> $GITHUB_OUTPUT
+          echo "项目目录: $DIR"
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
-
-      - name: 设置 JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: 设置 Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
-
-      - name: 安装项目依赖
+      - name: 安装依赖
         run: |
-          cd secure-guard
+          cd ${{ steps.finddir.outputs.dir }}
           npm install
-
-      - name: 修复 expo-font 兼容性
+      - name: 修复兼容性
         run: |
-          cd secure-guard
-          rm -rf node_modules/expo-font/android
-          if [ -f node_modules/expo/android/build/generated/expo/src/main/java/expo/modules/ExpoModulesPackageList.java ]; then
-            sed -i '/expo.modules.font.FontLoaderModule.class,/d' node_modules/expo/android/build/generated/expo/src/main/java/expo/modules/ExpoModulesPackageList.java
-            sed -i '/expo.modules.font.FontUtilsModule.class,/d' node_modules/expo/android/build/generated/expo/src/main/java/expo/modules/ExpoModulesPackageList.java
-          fi
-
-      - name: 修复 Gradle 兼容性
-        run: |
-          cd secure-guard
+          cd ${{ steps.finddir.outputs.dir }}
+          rm -rf node_modules/expo-font/android node_modules/react-native-reanimated/android
           sed -i 's/ext.useExpoPublishing = {/ext.useExpoPublishing = {\n  \/\/ fix/' node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle
-
-      - name: 调整构建配置
+          sed -i 's/org.gradle.jvmargs=-Xmx2048m/org.gradle.jvmargs=-Xmx4096m/' android/gradle.properties
+          sed -i 's/reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64/reactNativeArchitectures=arm64-v8a/' android/gradle.properties
+      - name: 构建APK
         run: |
-          cd secure-guard/android
-          sed -i 's/org.gradle.jvmargs=-Xmx2048m/org.gradle.jvmargs=-Xmx4096m/' gradle.properties
-          sed -i 's/reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64/reactNativeArchitectures=arm64-v8a/' gradle.properties
-
-      - name: 构建 APK
-        run: |
-          cd secure-guard/android
+          cd ${{ steps.finddir.outputs.dir }}/android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-
-      - name: 上传 APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: secure-guard-apk
-          path: secure-guard/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+          path: ${{ steps.finddir.outputs.dir }}/android/app/build/outputs/apk/debug/app-debug.apk
